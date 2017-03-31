@@ -1,4 +1,4 @@
-package com.github.fedorov_s_n.entity_lock;
+package com.github.fedorov_s_n.entity_locker;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
