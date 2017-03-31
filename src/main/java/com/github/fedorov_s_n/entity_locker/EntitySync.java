@@ -95,7 +95,8 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
         if (sleepAction == AVOID_DEADLOCK) {
             return true;
         }
-        Id id = getId();
+        ThreadState<Id> threadState = state.get();
+        Id id = threadState.id;
         Map<Id, LockState> presentLocks;
         Map<Id, LockState> proposedLocks;
         do {
@@ -115,6 +116,7 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
                 throw new IllegalStateException();
             }
         } while (!locks.compareAndSet(presentLocks, proposedLocks));
+        threadState.acquired.remove(id);
         return true;
     }
 
