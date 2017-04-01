@@ -1,6 +1,6 @@
 # Entity locker
 
-Class that provides locking utilities for arbitrary amount of entities distinguished by id.
+Class that provides locking utilities for arbitrary сount of entities distinguished by id.
 
 ## Features
 
@@ -54,9 +54,9 @@ or a longer example
 
 ## Notes
 
-  1. `null` id isn't allowed as `null` is reserved value for global locks
+  1. `null` id isn't allowed because `null` value is reserved for global locks
   2. Lock relies on correct implementation of `equals`/`hashCode` methods of id object
   3. Deadlock protection is only implemented for `EntityLock.lock()` and `EntityLocker.exclusive()` methods.
   4. After entering global lock mode thread keeps exclusive access until all the locks are released
-  5. Call to lock and unlock methods of same lock from different threads leads to undefined behavior
+  5. Call to `lock` and `unlock` methods of same lock from different threads leads to undefined behavior
   6. Requires java 8 to run

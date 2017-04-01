@@ -3,7 +3,7 @@ package com.github.fedorov_s_n.entity_locker;
 import java.util.function.Supplier;
 
 /**
- * Class that provides locking utilities for arbitrary amount of entities
+ * Class that provides locking utilities for arbitrary count of entities
  * distinguished by id.
  *
  * @author Sergey N. Fedorov
@@ -12,7 +12,7 @@ import java.util.function.Supplier;
 public class EntityLocker<Id> {
 
     /**
-     * Default amount of distinct id's that should be locked by single thread to
+     * Default count of distinct id's that should be locked by single thread to
      * switch it to global lock mode
      */
     public static final int DEFAULT_ESCALATION_THRESHOLD = 8;
@@ -28,7 +28,7 @@ public class EntityLocker<Id> {
     /**
      * Creates locker class with specified escalation threshold
      *
-     * @param escalationThreshold amount of distinct id's that should be locked
+     * @param escalationThreshold count of distinct id's that should be locked
      * by single thread to switch it to global lock mode
      */
     public EntityLocker(int escalationThreshold) {
@@ -51,7 +51,7 @@ public class EntityLocker<Id> {
      *
      * @param <T> output object type
      * @param id entity id or null for global locking
-     * @param action Function that has exclusive access to entity with given id
+     * @param action function that has exclusive access to entity with given id
      * and returns object of type T
      * @return returned object upon lock release
      */
