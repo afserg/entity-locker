@@ -3,6 +3,7 @@ package com.github.fedorov_s_n.entity_locker;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 import java.util.function.IntSupplier;
@@ -210,15 +211,56 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
         return true;
     }
 
-    public Id getId() {
-        return state.get().id;
+    public void lock(Id id) {
+        setId(id);
+        if (isEffectivelyGlobal(id)) {
+            acquire(AVOID_DEADLOCK);
+        } else {
+            acquireShared(AVOID_DEADLOCK);
+        }
     }
 
-    public void setId(Id id) {
-        state.get().id = id;
+    public void lockInterruptibly(Id id) throws InterruptedException {
+        setId(id);
+        if (isEffectivelyGlobal(id)) {
+            acquireInterruptibly(IGNORE_DEADLOCK);
+        } else {
+            acquireSharedInterruptibly(IGNORE_DEADLOCK);
+        }
     }
 
-    public boolean shouldEscalateToGlobal() {
-        return state.get().acquired.size() >= escalationThreshold;
+    public boolean tryLock(Id id) {
+        setId(id);
+        return isEffectivelyGlobal(id)
+            ? tryAcquire(IGNORE_DEADLOCK)
+            : tryAcquireShared(IGNORE_DEADLOCK) != -1;
+    }
+
+    public boolean tryLock(Id id, long time, TimeUnit unit) throws InterruptedException {
+        setId(id);
+        return isEffectivelyGlobal(id)
+            ? tryAcquireNanos(IGNORE_DEADLOCK, unit.toNanos(time))
+            : tryAcquireSharedNanos(IGNORE_DEADLOCK, unit.toNanos(time));
+    }
+
+    public void unlock(Id id) {
+        setId(id);
+        if (isGlobal(id)) {
+            release(IGNORE_DEADLOCK);
+        } else {
+            releaseShared(IGNORE_DEADLOCK);
+        }
+    }
+
+    public boolean isGlobal(Id id) {
+        return id == null || isHeldExclusively();
+    }
+
+    public boolean isEffectivelyGlobal(Id id) {
+        return isGlobal(id) || state.get().acquired.size() >= escalationThreshold;
+    }
+
+    private void setId(Id id) {
+        state.get().id = isEffectivelyGlobal(id) ? null : id;
     }
 }

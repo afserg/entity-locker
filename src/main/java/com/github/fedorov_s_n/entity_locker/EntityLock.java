@@ -16,48 +16,27 @@ public class EntityLock<Id> implements Lock {
 
     @Override
     public void lock() {
-        setId();
-        if (isEffectivelyGlobal()) {
-            sync.acquire(EntitySync.AVOID_DEADLOCK);
-        } else {
-            sync.acquireShared(EntitySync.AVOID_DEADLOCK);
-        }
+        sync.lock(id);
     }
 
     @Override
     public void lockInterruptibly() throws InterruptedException {
-        setId();
-        if (isEffectivelyGlobal()) {
-            sync.acquireInterruptibly(EntitySync.IGNORE_DEADLOCK);
-        } else {
-            sync.acquireSharedInterruptibly(EntitySync.IGNORE_DEADLOCK);
-        }
+        sync.lockInterruptibly(id);
     }
 
     @Override
     public boolean tryLock() {
-        setId();
-        return isEffectivelyGlobal()
-            ? sync.tryAcquire(EntitySync.IGNORE_DEADLOCK)
-            : sync.tryAcquireShared(EntitySync.IGNORE_DEADLOCK) != -1;
+        return sync.tryLock(id);
     }
 
     @Override
     public boolean tryLock(long time, TimeUnit unit) throws InterruptedException {
-        setId();
-        return isEffectivelyGlobal()
-            ? sync.tryAcquireNanos(EntitySync.IGNORE_DEADLOCK, unit.toNanos(time))
-            : sync.tryAcquireSharedNanos(EntitySync.IGNORE_DEADLOCK, unit.toNanos(time));
+        return sync.tryLock(id, time, unit);
     }
 
     @Override
     public void unlock() {
-        setId();
-        if (isGlobal()) {
-            sync.release(EntitySync.IGNORE_DEADLOCK);
-        } else {
-            sync.releaseShared(EntitySync.IGNORE_DEADLOCK);
-        }
+        sync.unlock(id);
     }
 
     @Override
@@ -66,22 +45,14 @@ public class EntityLock<Id> implements Lock {
     }
 
     public boolean isGlobal() {
-        return id == null || sync.isHeldExclusively();
+        return sync.isGlobal(id);
     }
 
     public boolean isEffectivelyGlobal() {
-        return isGlobal() || sync.shouldEscalateToGlobal();
+        return sync.isEffectivelyGlobal(id);
     }
 
     public Id getId() {
         return id;
-    }
-
-    private void setId() {
-        sync.setId(getEffectiveId());
-    }
-
-    public Id getEffectiveId() {
-        return isEffectivelyGlobal() ? null : id;
     }
 }
