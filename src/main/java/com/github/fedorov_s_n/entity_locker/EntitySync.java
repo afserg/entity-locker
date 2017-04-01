@@ -2,20 +2,21 @@ package com.github.fedorov_s_n.entity_locker;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 class EntitySync<Id> extends AbstractQueuedSynchronizer {
 
     static class LockState {
 
-        final Thread thread;
-        volatile int lockCount;
+        final Thread thread = Thread.currentThread();
+        volatile int lockCount = 1;
 
-        LockState() {
-            this.thread = Thread.currentThread();
-            this.lockCount = 1;
+        boolean currentThread() {
+            return Thread.currentThread().equals(thread);
         }
     }
 
@@ -28,23 +29,117 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
 
     final static int AVOID_DEADLOCK = 0;
     final static int IGNORE_DEADLOCK = 1;
+    final int escalationThreshold;
     final ThreadLocal<ThreadState<Id>> state = ThreadLocal.withInitial(ThreadState::new);
     final AtomicReference<Map<Id, LockState>> locks = new AtomicReference<>(new HashMap<>());
 
+    EntitySync(int escalationThreshold) {
+        this.escalationThreshold = escalationThreshold;
+    }
+
     @Override
-    public boolean tryAcquire(int arg) {
-        return super.tryAcquire(arg);
+    public boolean tryAcquire(int sleepAction) {
+        ThreadState<Id> threadState = state.get();
+        Map<Id, LockState> presentLocks;
+        Map<Id, LockState> proposedLocks;
+        Supplier<Boolean> deferredAction;
+        do {
+            presentLocks = locks.get();
+            proposedLocks = new HashMap<>(presentLocks);
+            LockState presentState = proposedLocks.get(null);
+            boolean failedAcquire
+                = (presentState != null && !presentState.currentThread())
+                | (threadState.sleeping
+                    ? !proposedLocks.isEmpty()
+                    : proposedLocks.size() > threadState.acquired.size());
+            if (failedAcquire) {
+                if (threadState.sleeping || sleepAction != AVOID_DEADLOCK) {
+                    return false;
+                }
+                proposedLocks.keySet().removeAll(threadState.acquired.keySet());
+                deferredAction = () -> {
+                    threadState.sleeping = true;
+                    releaseShared(AVOID_DEADLOCK);
+                    return false;
+                };
+            } else {
+                if (presentState != null) {
+                    presentState.lockCount++;
+                    threadState.sleeping = false;
+                    return true;
+                }
+                LockState proposedState = new LockState();
+                proposedLocks.clear();
+                proposedLocks.put(null, proposedState);
+                deferredAction = () -> {
+                    threadState.sleeping = false;
+                    proposedState.lockCount += threadState.acquired
+                        .values()
+                        .stream()
+                        .mapToInt(s -> s.lockCount)
+                        .sum();
+                    threadState.acquired.clear();
+                    threadState.acquired.put(null, proposedState);
+                    setExclusiveOwnerThread(Thread.currentThread());
+                    return true;
+                };
+            }
+        } while (!locks.compareAndSet(presentLocks, proposedLocks));
+        return deferredAction.get();
+    }
+
+    @Override
+    public boolean tryRelease(int arg) {
+        ThreadState<Id> threadState = state.get();
+        Map<Id, LockState> presentLocks = locks.get();
+        LockState presentState = presentLocks.get(null);
+        if (presentState == null || !presentState.currentThread()) {
+            throw new IllegalMonitorStateException(
+                "Shouldn't attempt to release global lock without acquiring it"
+            );
+        } else if (presentState.lockCount > 1) {
+            presentState.lockCount--;
+            return false;
+        } else {
+            Map<Id, LockState> proposedLocks = new HashMap<>(presentLocks);
+            proposedLocks.remove(null);
+            setExclusiveOwnerThread(null);
+            threadState.acquired.remove(null);
+            if (!locks.compareAndSet(presentLocks, proposedLocks)) {
+                throw new IllegalMonitorStateException(
+                    "State was changed without exclusive access"
+                );
+            }
+            return true;
+        }
+    }
+
+    @Override
+    public boolean isHeldExclusively() {
+        LockState lockState = state.get().acquired.get(null);
+        return lockState != null && lockState.lockCount > 0;
     }
 
     @Override
     public int tryAcquireShared(int sleepAction) {
         ThreadState<Id> threadState = state.get();
-        Id id = threadState.id;
+        Id id = Objects.requireNonNull(threadState.id);
         Map<Id, LockState> presentLocks;
         Map<Id, LockState> proposedLocks;
         IntSupplier deferredAction;
         do {
             presentLocks = locks.get();
+            LockState globalState = presentLocks.get(null);
+            if (globalState == null) {
+                // ok
+            } else if (globalState.currentThread()) {
+                throw new IllegalMonitorStateException(
+                    "Shouldn't attempt to acquire entity lock after acquiring global lock"
+                );
+            } else {
+                // another thread has exclusive access
+                return -1;
+            }
             proposedLocks = new HashMap<>(presentLocks);
             if (threadState.sleeping) {
                 for (Map.Entry<Id, LockState> e : threadState.acquired.entrySet()) {
@@ -62,7 +157,7 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
                     threadState.sleeping = false;
                     return 1;
                 };
-            } else if (Thread.currentThread().equals(presentState.thread)) {
+            } else if (presentState.currentThread()) {
                 deferredAction = () -> {
                     presentState.lockCount++;
                     threadState.sleeping = false;
@@ -86,17 +181,12 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
     }
 
     @Override
-    public boolean tryRelease(int arg) {
-        return super.tryRelease(arg);
-    }
-
-    @Override
     public boolean tryReleaseShared(int sleepAction) {
         if (sleepAction == AVOID_DEADLOCK) {
             return true;
         }
         ThreadState<Id> threadState = state.get();
-        Id id = threadState.id;
+        Id id = Objects.requireNonNull(threadState.id);
         Map<Id, LockState> presentLocks;
         Map<Id, LockState> proposedLocks;
         do {
@@ -105,7 +195,7 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
             LockState presentState = proposedLocks.get(id);
             if (presentState == null) {
                 return false;
-            } else if (Thread.currentThread().equals(presentState.thread)) {
+            } else if (presentState.currentThread()) {
                 if (presentState.lockCount == 1) {
                     proposedLocks.remove(id);
                 } else {
@@ -126,5 +216,9 @@ class EntitySync<Id> extends AbstractQueuedSynchronizer {
 
     public void setId(Id id) {
         state.get().id = id;
+    }
+
+    public boolean shouldEscalateToGlobal() {
+        return state.get().acquired.size() >= escalationThreshold;
     }
 }
